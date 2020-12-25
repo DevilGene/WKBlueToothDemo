@@ -2,6 +2,8 @@
 蓝牙的demo ---- OC
 使用`CBCentralMannager`模式
 
+demo示例:
+![Demo示例-c300](https://upload-images.jianshu.io/upload_images/16014398-410466a6e7cdc57e.PNG?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 ---
 1.导入CoreBluetooth框架
 
