@@ -1,5 +1,5 @@
 # WKBlueToothDemo
-蓝牙的demo ---- OC
+蓝牙的demo ---- OC版
 使用`CBCentralMannager`模式
 
 demo示例:
