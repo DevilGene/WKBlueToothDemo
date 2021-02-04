@@ -32,6 +32,9 @@
 @property (nonatomic, strong) UIButton *characteristicBtn;
 @property (nonatomic, strong) UILabel *characteristicLabel;
 
+@property (nonatomic, strong) NSString *name; //设备名 + mac地址
+@property (nonatomic, strong) CBCharacteristic *readCharacteristic; //用来读取信息的特征 0xFFB1
+
 @end
 
 @implementation ViewController
@@ -46,6 +49,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     // Do any additional setup after loading the view.
+    self.name = @"";
     
     [self initView];
     
@@ -68,6 +72,15 @@
     scanBtn.layer.borderColor = [[UIColor grayColor] CGColor];
     [scanBtn addTarget:self action:@selector(scanPeripheralClick) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:scanBtn];
+    
+    UIButton *writeBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    writeBtn.frame = CGRectMake(10, 180, 100, 50);
+    [writeBtn setTitle:@"写入数据" forState:UIControlStateNormal];
+    [writeBtn setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+    writeBtn.layer.borderWidth = 1;
+    writeBtn.layer.borderColor = [[UIColor grayColor] CGColor];
+    [writeBtn addTarget:self action:@selector(writeBtnPeripheralClick) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:writeBtn];
     
     UIButton *disConnectBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     disConnectBtn.frame = CGRectMake(self.view.frame.size.width / 2.0 - 50, self.view.frame.size.height - 100, 100, 50);
@@ -142,6 +155,29 @@
     if (peripheral.name) {
         NSLog(@"%@",[NSString stringWithFormat:@"发现设备,设备名:%@",peripheral.name]);
         [self.peripherals addObject:peripheral];
+        
+        NSData *adata = advertisementData[@"kCBAdvDataManufacturerData"];
+        
+        NSMutableString *string = [[NSMutableString alloc] initWithCapacity:[adata length]];
+        [adata enumerateByteRangesUsingBlock:^(const void *bytes, NSRange byteRange, BOOL *stop) {
+            unsigned char *dataBytes = (unsigned char*)bytes;
+            for (NSInteger i = 0; i < byteRange.length; i++) {
+                NSString *hexStr = [NSString stringWithFormat:@"%x", (dataBytes[i]) & 0xff];
+                if ([hexStr length] == 2) {
+                    [string appendString:hexStr];
+                } else {
+                    [string appendFormat:@"0%@", hexStr];
+                }
+            }
+        }];
+        
+        if (string.length > 16) {
+            NSLog(@"广播包：%@",string);
+
+            NSString *macStr = [string substringWithRange:NSMakeRange(4, 12)];
+            NSLog(@"MAC地址：%@",macStr);
+        }
+        
         
         if (!self.peripheralsView) {
             self.peripheralsView = [[PeripheralListView alloc] initWithFrame:CGRectMake(50, 100, self.view.frame.size.width - 100, self.view.frame.size.height - 200)];
@@ -269,6 +305,10 @@
         
         NSLog(@">>>服务:%@ 的 特征: %@",service.UUID,characteristic.UUID);
         
+        if ([characteristic.UUID.UUIDString isEqualToString:@"FFB1"]) {
+            self.readCharacteristic = characteristic;
+        }
+        
         //选一个订阅
         if (!self.peripheralsView) {
             self.peripheralsView = [[PeripheralListView alloc] initWithFrame:CGRectMake(50, 100, self.view.frame.size.width - 100, self.view.frame.size.height - 200)];
@@ -282,6 +322,8 @@
                     CBCharacteristic *characteristic = dataArr[index];
                     weakSelf.characteristicLabel.text = [NSString stringWithFormat:@"已选择特征：%@",characteristic.UUID.UUIDString];
                     weakSelf.cbCharacteristic = characteristic;
+                    
+                    [weakSelf.cbPeripheral readValueForCharacteristic:characteristic];
                     
                     //订阅,实时接收
                     [weakSelf.cbPeripheral setNotifyValue:YES forCharacteristic:characteristic];
@@ -306,6 +348,53 @@
     //    NSLog(@"%@",data);
     //接收蓝牙发来的数据
     NSLog(@"characteristic uuid:%@  value:%@",characteristic.UUID,characteristic.value);
+    if (characteristic.value.length >= 12) {
+        NSString *str = [self convertDataToHexStr:characteristic.value];
+        
+        NSString *circleStr = [str substringWithRange:NSMakeRange(6, 8)];
+        NSString *timeStr = [str substringWithRange:NSMakeRange(14, 8)];
+        
+        NSString *circle10 = [NSString stringWithFormat:@"%lu",strtoul([circleStr UTF8String],0,16)];
+        NSString *time10 = [NSString stringWithFormat:@"%lu",strtoul([timeStr UTF8String],0,16)];
+        
+        NSLog(@"圈数：%@ 时间：%@",circle10,time10);
+    }
+}
+
+- (void)peripheral:(CBPeripheral *)peripheral didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error{
+    if (characteristic.isNotifying) {
+        [peripheral readValueForCharacteristic:characteristic];
+    } else {
+//        NSLog(@"Notification stopped on %@.  Disconnecting", characteristic);
+//        NSLog(@"%@", characteristic);
+//        [self.centralManager cancelPeripheralConnection:peripheral];
+    }
+}
+
+
+#pragma mark - 操作
+- (void)writeBtnPeripheralClick {
+    //点击写入
+    [self writeCheckBleWithBle];
+}
+// 发送检查蓝牙命令
+- (void)writeCheckBleWithBle {
+//    _style = 1;
+    // 发送下行指令(发送一条)
+//    Byte byte[] = {0xA1,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x55};
+    Byte byte[] = {0xA1,0x02,0x01,0x00,0x55};
+    
+    NSData *data = [[NSData alloc]initWithBytes:byte length:5];
+    
+    [self.cbPeripheral writeValue:data forCharacteristic:self.cbCharacteristic type:CBCharacteristicWriteWithResponse];
+}
+
+- (void)peripheral:(CBPeripheral *)peripheral didWriteValueForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error{
+    NSLog(@"写入成功");
+    
+    if (self.readCharacteristic) {
+        [peripheral readValueForCharacteristic:self.readCharacteristic];
+    }
 }
 
 #pragma mark - 状态
@@ -356,6 +445,28 @@
         default:
             break;
     }
+}
+
+
+- (NSString *)convertDataToHexStr:(NSData *)adata{
+    if (!adata || [adata length] == 0) {
+        return @"";
+    }
+    NSMutableString *string = [[NSMutableString alloc] initWithCapacity:[adata length]];
+    
+    [adata enumerateByteRangesUsingBlock:^(const void *bytes, NSRange byteRange, BOOL *stop) {
+        unsigned char *dataBytes = (unsigned char*)bytes;
+        for (NSInteger i = 0; i < byteRange.length; i++) {
+            NSString *hexStr = [NSString stringWithFormat:@"%x", (dataBytes[i]) & 0xff];
+            if ([hexStr length] == 2) {
+                [string appendString:hexStr];
+            } else {
+                [string appendFormat:@"0%@", hexStr];
+            }
+        }
+    }];
+    
+    return string;
 }
 
 @end
